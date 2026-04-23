@@ -1,0 +1,81 @@
+import joblib
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+
+def predict_top_additions(model_path, ps_range, koh_range, time_range, top_n=5,
+                          save_path_csv=None, save_path_heatmap=None):
+    """
+    Predict the best dosing combinations using a trained RF model to maximize HI.
+
+    Args:
+    - model_path: str, model file path (.pkl)
+    - ps_range: list or np.array, PS dosage range
+    - koh_range: list or np.array, KOH dosage range
+    - time_range: list or np.array, microwave time range
+    - top_n: int, number of top predicted HI combinations to output
+    - save_path_csv: str, CSV path for all combinations and predictions, or None
+    - save_path_heatmap: str, heatmap path, or None (only generated when time_range has one value)
+    """
+
+    # Load model
+    rf = joblib.load(model_path)
+
+    # Build full parameter grid
+    grid = np.array([[ps, koh, t] for ps in ps_range for koh in koh_range for t in time_range])
+
+    # Predict HI
+    pred_HI = rf.predict(grid)
+
+    # Get top-N best combinations
+    top_indices = np.argsort(pred_HI)[-top_n:][::-1]
+    top_combos = grid[top_indices]
+    top_HI = pred_HI[top_indices]
+
+    print(f"Top {top_n} best combinations and predicted HI:")
+    for i in range(top_n):
+        print(f"{i + 1}. Combination (PS%, KOH%, Microwave Time [min]): {top_combos[i]}, Predicted HI: {top_HI[i]:.4f}")
+
+    # Save all combinations and predictions
+    df_result = pd.DataFrame(grid, columns=['PS Dosage (%)', 'KOH Dosage (%)', 'Microwave Time (min)'])
+    df_result['Predicted_HI'] = pred_HI
+    if save_path_csv:
+        df_result.to_csv(save_path_csv, index=False)
+        print("All combination predictions saved to:", save_path_csv)
+
+    # Visualization: PS x KOH heatmap (only when microwave time is fixed)
+    if save_path_heatmap and len(time_range) == 1:
+        heatmap_data = df_result.pivot(index='KOH Dosage (%)', columns='PS Dosage (%)', values='Predicted_HI')
+
+        plt.figure(figsize=(8, 6))
+        plt.imshow(heatmap_data, origin='lower', cmap='YlGnBu', aspect='auto')
+        plt.colorbar(label='Predicted HI')
+        plt.xticks(ticks=np.arange(len(ps_range)), labels=ps_range)
+        plt.yticks(ticks=np.arange(len(koh_range)), labels=koh_range)
+        plt.xlabel('PS Dosage (%)')
+        plt.ylabel('KOH Dosage (%)')
+        plt.title(f'Predicted HI Heatmap (Microwave Time={time_range[0]} min)')
+        plt.tight_layout()
+        plt.savefig(save_path_heatmap, dpi=300)
+        plt.show()
+        print("Heatmap saved to:", save_path_heatmap)
+    elif len(time_range) != 1:
+        print("Microwave time is not unique; heatmap was not generated.")
+
+
+# ===========================
+# Example usage
+ps_range = np.arange(0, 11, 1)  # PS dosage 0-10%
+koh_range = np.arange(0, 11, 1)  # KOH dosage 0-10%
+time_range = [5]  # Microwave time fixed at 5 min
+
+predict_top_additions(
+    model_path=r'E:\rf_model.pkl',
+    ps_range=ps_range,
+    koh_range=koh_range,
+    time_range=time_range,
+    top_n=5,
+    save_path_csv=r'E:\All_combinations_predicted_HI.csv',
+    save_path_heatmap=r'E:\HI_heatmap.png'
+)
