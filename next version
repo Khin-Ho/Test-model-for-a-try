@@ -1,0 +1,143 @@
+import os
+import re
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg", force=True)
+import matplotlib.pyplot as plt
+
+print("Current Matplotlib backend:", matplotlib.get_backend())
+
+# ============================ 1. Read Hitachi F-7000 EEM ============================
+def read_hitachi_eem(filepath):
+    """Read Hitachi F-7000 EEM data matrix."""
+    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+        lines = f.readlines()
+
+    # Find the "Data points" section
+    start_idx = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("Data points"):
+            start_idx = i + 1
+            break
+    if start_idx is None:
+        print(f"Warning: 'Data points' section not found: {filepath}")
+        return None, None, None, None
+
+    data_lines = [l.strip() for l in lines[start_idx:] if l.strip()]
+
+    # First row contains Ex wavelengths
+    header_parts = re.split(r'\s+', data_lines[0])
+    ex = np.array([float(x) for x in header_parts if x != ''])
+
+    # Following rows contain Em + intensity values
+    em_list = []
+    matrix = []
+    for line in data_lines[1:]:
+        parts = re.split(r'\s+', line)
+        if len(parts) < 2:
+            continue
+        try:
+            em_val = float(parts[0])
+            row_vals = []
+            for v in parts[1:]:
+                try:
+                    val = float(v)
+                    if val >= 9999 or val <= -9999:
+                        val = np.nan
+                except:
+                    val = np.nan
+                row_vals.append(val)
+            em_list.append(em_val)
+            matrix.append(row_vals)
+        except:
+            continue
+
+    em = np.array(em_list)
+    intensity = np.array(matrix)
+    return ex, em, intensity, None
+
+# ============================ 2. Define five fluorescence regions ============================
+regions = {
+    'R1': {'Ex': (200, 250), 'Em': (250, 330)},
+    'R2': {'Ex': (200, 250), 'Em': (330, 380)},
+    'R3': {'Ex': (200, 250), 'Em': (380, 550)},
+    'R4': {'Ex': (250, 380), 'Em': (250, 380)},
+    'R5': {'Ex': (250, 450), 'Em': (380, 550)},
+}
+
+def calc_region_intensity(ex, em, intensity, region):
+    mask_ex = (ex >= region['Ex'][0]) & (ex <= region['Ex'][1])
+    mask_em = (em >= region['Em'][0]) & (em <= region['Em'][1])
+    sub_intensity = intensity[np.ix_(mask_em, mask_ex)]
+    if sub_intensity.size == 0:
+        return np.nan
+    return np.nanmean(sub_intensity)
+
+def calc_rli(ex, em, intensity):
+    """Calculate the humification trend index (RLI)."""
+    R = {}
+    for key, reg in regions.items():
+        R[key] = calc_region_intensity(ex, em, intensity, reg)
+    numerator = (R['R3'] + R['R5']) - (R['R1'] + R['R2'] + R['R4'])
+    denominator = sum(R.values())
+    rli = np.nan if denominator == 0 else numerator / denominator
+    return rli, R
+
+# ============================ 3. Main program ============================
+
+# Modify your input folder path here
+folder = r"E:\Desktop\modeltest-1"
+print(f"\nCurrent input folder: {folder}")
+
+# Check folder path
+if not os.path.exists(folder):
+    raise FileNotFoundError(f"Folder does not exist: {folder}")
+
+# Create subfolder for output figures
+save_fig_folder = os.path.join(folder, "plots_em_xaxis_ex_forward")
+os.makedirs(save_fig_folder, exist_ok=True)
+
+# Find all TXT files
+txt_files = [f for f in os.listdir(folder) if f.lower().endswith(".txt")]
+if not txt_files:
+    raise FileNotFoundError(f"No .TXT files found in folder: {folder}")
+else:
+    print(f"Detected {len(txt_files)} EEM files: {txt_files}\n")
+
+results = []
+
+for file in txt_files:
+    path = os.path.join(folder, file)
+    ex, em, intensity, _ = read_hitachi_eem(path)
+    if ex is None:
+        print(f"Warning: failed to read file {file}, skipped.")
+        continue
+
+    # Calculate humification index
+    rli, R = calc_rli(ex, em, intensity)
+    results.append([file, rli, R['R1'], R['R2'], R['R3'], R['R4'], R['R5']])
+
+    # Plot EEM contour
+    plt.figure(figsize=(8,6))
+    plt.contourf(em, ex, intensity.T, levels=200, cmap='turbo')
+    plt.xlabel('Emission Wavelength Em (nm)')
+    plt.ylabel('Excitation Wavelength Ex (nm)')
+    plt.title(f"{file} EEM Contour (Ex Forward, Em on X-axis)")
+    plt.colorbar(label='Fluorescence Intensity (a.u.)')
+    plt.ylim(200, 450)
+    plt.tight_layout()
+
+    save_path = os.path.join(save_fig_folder, file.replace('.TXT','_EEM.png').replace('.txt','_EEM.png'))
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+    print(f"{file} processed, figure saved to: {save_path}")
+
+# ============================ 4. Save humification results ============================
+df = pd.DataFrame(results, columns=['Sample', 'RLI', 'R1', 'R2', 'R3', 'R4', 'R5'])
+df = df.sort_values(by='RLI', ascending=False)
+csv_path = os.path.join(folder, "humification_results_em_xaxis_ex_forward.csv")
+df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+
+print(f"\nAll charts and humification results have been saved to: {folder}")
+print(df)
