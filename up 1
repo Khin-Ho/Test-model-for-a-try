@@ -1,0 +1,70 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.svm import SVR
+from sklearn.ensemble import RandomForestRegressor, StackingRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+data_path = "Humification_Index_results.csv"
+df = pd.read_csv(data_path, encoding="utf-8")
+X = df.iloc[:, :3].copy()
+X.columns = ["A", "B", "C"]
+y = df["Humification Index"]
+
+X_train, X_test, Y_train, Y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+scaler = StandardScaler().fit(X_train)
+X_train_scaled = scaler.transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+models = {
+    "DecisionTree": DecisionTreeRegressor(random_state=42),
+    "SVR_linear": SVR(kernel="linear"),
+    "RandomForest": RandomForestRegressor(n_estimators=700, random_state=42)
+}
+
+output_dir = "."
+
+for name, model in models.items():
+    model.fit(X_train_scaled, Y_train)
+
+    pred_train = model.predict(X_train_scaled)
+    print(f"\n{name} - Training set")
+    print("MSE:", mean_squared_error(Y_train, pred_train))
+    print("MAE:", mean_absolute_error(Y_train, pred_train))
+    print("R2:", r2_score(Y_train, pred_train))
+
+    pred_test = model.predict(X_test_scaled)
+    print(f"{name} - Testing set")
+    print("MSE:", mean_squared_error(Y_test, pred_test))
+    print("MAE:", mean_absolute_error(Y_test, pred_test))
+    print("R2:", r2_score(Y_test, pred_test))
+
+    pd.DataFrame(Y_train).to_csv(f"{output_dir}/{name}_train.csv", index=False)
+    pd.DataFrame(pred_train).to_csv(f"{output_dir}/{name}_pred_train.csv", index=False)
+    pd.DataFrame(Y_test).to_csv(f"{output_dir}/{name}_test.csv", index=False)
+    pd.DataFrame(pred_test).to_csv(f"{output_dir}/{name}_pred_test.csv", index=False)
+
+stack = StackingRegressor(
+    estimators=[(n, m) for n, m in models.items()],
+    final_estimator=LinearRegression()
+)
+stack.fit(X_train_scaled, Y_train)
+
+pred_train_stack = stack.predict(X_train_scaled)
+pred_test_stack = stack.predict(X_test_scaled)
+
+pd.DataFrame(pred_train_stack).to_csv(f"{output_dir}/Stacking_pred_train.csv", index=False)
+pd.DataFrame(pred_test_stack).to_csv(f"{output_dir}/Stacking_pred_test.csv", index=False)
+
+print("\nStacking - Training set")
+print("MSE:", mean_squared_error(Y_train, pred_train_stack))
+print("MAE:", mean_absolute_error(Y_train, pred_train_stack))
+print("R2:", r2_score(Y_train, pred_train_stack))
+
+print("\nStacking - Testing set")
+print("MSE:", mean_squared_error(Y_test, pred_test_stack))
+print("MAE:", mean_absolute_error(Y_test, pred_test_stack))
+print("R2:", r2_score(Y_test, pred_test_stack))
