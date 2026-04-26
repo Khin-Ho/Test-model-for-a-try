@@ -1,0 +1,58 @@
+import pandas as pd
+from sklearn.model_selection import cross_val_score, KFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import r2_score, mean_squared_error
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib
+
+matplotlib.rcParams['axes.unicode_minus'] = False
+
+df = pd.read_csv(r"E:\Desktop\modeltest-1 - copy\Humification_results-HI\Humification_Index_results.csv", encoding='gbk')
+
+base_cols = list(df.columns[:3])
+df = df.rename(columns=dict(zip(base_cols, ["A", "B", "C"])))
+
+print("Current columns:", df.columns.tolist())
+
+X = df[["A", "B", "C", "R1", "R2", "R3", "R4", "R5"]]
+y = df["Humification Index"]
+
+print("Feature sample:")
+print(X.head())
+print("Target sample:")
+print(y.head())
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+rf = RandomForestRegressor(n_estimators=200, random_state=42)
+rf.fit(X_scaled, y)
+
+y_pred = rf.predict(X_scaled)
+r2 = r2_score(y, y_pred)
+rmse = np.sqrt(mean_squared_error(y, y_pred))
+print(f"RF model trained: R2={r2:.3f}, RMSE={rmse:.3f}")
+
+cv = KFold(n_splits=3, shuffle=True, random_state=42)
+cv_scores = cross_val_score(rf, X_scaled, y, cv=cv, scoring="r2")
+print(f"Cross-validation R2 scores: {cv_scores}")
+print(f"Mean R2: {np.mean(cv_scores):.3f}")
+
+importance = pd.DataFrame({
+    "Feature": X.columns,
+    "Importance": rf.feature_importances_
+}).sort_values("Importance", ascending=False)
+print("\nFeature importance:")
+print(importance)
+
+plt.figure(figsize=(8, 5))
+plt.barh(importance["Feature"], importance["Importance"], color="skyblue")
+plt.xlabel("Importance")
+plt.ylabel("Feature")
+plt.title("Random Forest Feature Importance")
+plt.gca().invert_yaxis()
+plt.tight_layout()
+plt.savefig(r"E:\Desktop\test\feature_importance.png", dpi=300, bbox_inches="tight")
+print("Feature importance plot saved to: E:\\Desktop\\test\\feature_importance.png")
